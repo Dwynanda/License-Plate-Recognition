@@ -2,7 +2,7 @@ import cv2
 import time
 import os
 import numpy as np
-from connection import db, cursor, simpan, insert_db
+from connection import db, cursor, simpan, insert_db, update_db, cek_waktu_masuk
 import threading
 from streaming import update_frame, jalankan_flask
 from ultralytics import YOLO
@@ -15,11 +15,11 @@ os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
 #inisialisasi main streaming dari IP CCTV
 cctv_main = "rtsp://admin:L2034E56@192.168.1.13:554/cam/realmonitor?channel=1&subtype=0" #  <-- IP CCTV
-kamera_main = cv2.VideoCapture(cctv_main, cv2.CAP_FFMPEG)
+kamera_main = cv2.VideoCapture("./python/footage/p0.avi")
 
 #inisialisasi sub streaming dari IP CCTV
 cctv_sub = "rtsp://admin:L2034E56@192.168.1.13:554/cam/realmonitor?channel=1&subtype=1" #  <-- IP CCTV
-kamera_sub = cv2.VideoCapture(cctv_sub, cv2.CAP_FFMPEG)
+kamera_sub = cv2.VideoCapture("./python/footage/p0.avi")
 
 #inisialisasi model deteksi, dan variabel-variabel
 model_kendaraan = YOLO("./python/model/yolo11n.pt")
@@ -35,7 +35,7 @@ nomor = 0
 #inisialisasi format platnomor Indonesia
 kode_plat = (
     "A", "B", "D", "E", "F", "G", "H", "K", "L", "M", "N", "P", "R", "S", "T", 
-    "W", "Z", "AA", "AB", "AD", "AE", "AG", "BA", "BB", "BD", "BE", "BG", "BH", 
+    "W", "Z", "AA", "AB", "AD", "AE", "AG", "BA", "BB", "BD", "BE", "BG", "BH", "KR",
     "BK",  "BL", "BM", "BN", "BP", "DA", "DB", "DC", "DD", "DE", "DG", "DH", "DK", 
     "DL", "DM", "DN", "DR", "DT", "EA", "EB", "ED", "KB", "KH", "KT", "KU", "PA", "PB"
 )
@@ -48,32 +48,45 @@ while True:
         break
 
 # deteksi kendaraan
-    deteksi_kendaraan = model_kendaraan(frame_sub, classes=[2, 3, 5, 7, 67],verbose=False)
+    deteksi_kendaraan = model_kendaraan(frame_sub, classes=[2, 3, 5, 7],verbose=False)
     hasil_kendaraan = deteksi_kendaraan[0].plot()
     for kendaraan in deteksi_kendaraan[0].boxes:
         kanan, atas, kiri, bawah = map(int, kendaraan.xyxy[0])
-        # crop_kendaraan = frame_sub[atas:bawah, kanan:kiri]
+
+    #menentukan jenis kendaraan
+        kelas = int(kendaraan.cls[0])
+        if kelas == 2:
+            jenis_kendaraan = "Mobil"
+        elif kelas == 3:
+            jenis_kendaraan = "Motor"
+        elif kelas in [5, 7]:
+            jenis_kendaraan = "Truk"
+        else:
+            continue
+
+        #crop_kendaraan = frame_sub[atas:bawah, kanan:kiri]
 
     #deteksi platnomor
         waktu_sekarang = time.time()
         if waktu_sekarang - waktu_terakhir >= waktu_deteksi:
-        # menyamakan posisi Main Stream dengan Sub Stream
+        #menyamakan posisi Main Stream dengan Sub Stream
             # posisi_video = kamera_sub.get(cv2.CAP_PROP_POS_MSEC)
             # kamera_main.set(cv2.CAP_PROP_POS_MSEC, posisi_video)
-            #capture kendaraan menggunakan main streaming CCTV
+
+        #capture kendaraan menggunakan main streaming CCTV
             ret_main, frame_main = kamera_main.read()
             if not ret_main:
                 print("Gagal membaca main streaming!")
                 continue
             waktu_terakhir = waktu_sekarang
 
-        # menghitung perbandingan resolusi kedua stream
+        #menghitung perbandingan resolusi kedua stream
             tinggi_sub, lebar_sub = frame_sub.shape[:2]
             tinggi_main, lebar_main = frame_main.shape[:2]
             skala_x = lebar_main / lebar_sub
             skala_y = tinggi_main / tinggi_sub
 
-        # mengubah koordinat Sub Stream ke Main Stream
+        #mengubah koordinat Sub Stream ke Main Stream
             kanan_main = int(kanan * skala_x)
             atas_main = int(atas * skala_y)
             kiri_main = int(kiri * skala_x)
@@ -104,18 +117,36 @@ while True:
                     
             #validasi sistem bahwa platnomor dikenali atau tidak
                 if platnomor_text.startswith(kode_plat) and score > 0.90:
-                    if not any(SequenceMatcher(None, platnomor_text, char).ratio() > 0.80 for char in platnomor_list):
-                    #jika dikenali, maka save image kendaraan dan platnomor ke folder images
-                        nomor_file += 1
-                        path_kendaraan = simpan(crop_kendaraan, "./laravel/public/images/kendaraan", f"{nomor_file}.jpg")
-                        path_plat = simpan(crop_platnomor, "./laravel/public/images/plat", f"{nomor_file}.jpg")
+                    if len(platnomor_text) >= 7:
+                        cursor = db.cursor()
+                        cursor.execute(""" SELECT platnomor FROM transaksi_parkir """)
+                        database_plat = cursor.fetchall()
 
-                    #dan jika dikenali, menyimpan data kendaraan dan platnomor ke database
-                        insert_db(platnomor_text, score, f"images/kendaraan/{nomor_file}.jpg", f"images/plat/{nomor_file}.jpg")
-                        platnomor_list.add(platnomor_text)
+                        if not any(SequenceMatcher(None, platnomor_text, char[0]).ratio() > 0.80 for char in database_plat):
+                        #jika dikenali, maka save image kendaraan dan platnomor ke folder images
+                            nomor_file += 1
+                            path_kendaraan = simpan(crop_kendaraan, "./laravel/public/images/kendaraan", f"{nomor_file}.jpg")
+                            path_plat = simpan(crop_platnomor, "./laravel/public/images/plat", f"{nomor_file}.jpg")
 
-                        print("Platnomor : ", platnomor_text)
-                        print("Score : ", score)
+                        #dan jika dikenali, menyimpan data kendaraan dan platnomor ke database
+                            insert_db(platnomor_text, jenis_kendaraan, f"images/kendaraan/{nomor_file}.jpg", f"images/plat/{nomor_file}.jpg",)
+                            platnomor_list.add(platnomor_text)
+
+                            print("Platnomor : ", platnomor_text)
+                            print("Kendaraan : ", jenis_kendaraan)
+                            print("Score : ", score)
+
+                        #mengupdate database ketika terdeteksi kendaraan out
+                        elif any(SequenceMatcher(None, platnomor_text, char[0]).ratio() > 0.80 for char in database_plat):
+                            for char in database_plat:
+                                if SequenceMatcher(None, platnomor_text, char[0]).ratio() > 0.80:
+                                    if cek_waktu_masuk(platnomor_text):
+                                            print("Platnomor : ", platnomor_text)
+                                            print("Kendaraan : ", jenis_kendaraan)
+                                            print("Score : ", score)
+                                            update_db(char[0], jenis_kendaraan)
+                    else:
+                        continue
                 else:
                     continue
             waktu_terakhir = waktu_sekarang
@@ -136,5 +167,8 @@ kamera_sub.release()
 kamera_main.release()
 cv2.destroyAllWindows()
 
-# coba buat plat harini berapa terdeteksi dan berapa plat totalnya terdeteksi
-# buat css nya
+#nanti tabelnya itu dipasah antara mobil, motor, truck karena ini sistem parkir yang biaya parkirnya itu tergantung jenis kendaraan. tambahkan id pada tabel(id transaksi)
+#sistem parkirnya itu in dan out, jangan digabung
+#nanti web nya itu bisa langsung kalkulasi durasi dia parkir itu berapa jam/menit
+
+#perbaiki isi dari total_biaya pada tabel transaksi parkir, supaya nominalnya itu sesuai

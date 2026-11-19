@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import mysql.connector
 import os
 import cv2
@@ -20,12 +20,70 @@ def simpan(gambar, folder , nama_file):
     cv2.imwrite(path_gambar, gambar)
     return(path_gambar)
 
-#fungsi untuk simpan kendaraan dan platnomor ke database
-def insert_db(plat_text, confidence, kendaraan_img, plat_img):
+#fungsi untuk simpan kendaraan dan platnomor ke database untuk transaksi parkir
+def insert_db(plat_text, jenis_kendaraan, kendaraan_img, plat_img):
     sql_command = """
-        INSERT INTO deteksi(platnomor_text, confidence, kendaraan_path, platnomor_path, date)
-        VALUES (%s, %s, %s, %s, NOW())
+        INSERT INTO transaksi_parkir(platnomor, jenis_kendaraan, gambar_kendaraan, gambar_plat, waktu_masuk, waktu_keluar, durasi_parkir, total_biaya)
+        VALUES (%s, %s, %s, %s, NOW(), %s, %s, %s)
     """
-    data = (plat_text, confidence, kendaraan_img, plat_img)
+    data = (plat_text, jenis_kendaraan, kendaraan_img, plat_img, None, None, None)
     cursor.execute(sql_command, data)
     db.commit()
+
+#fungsi untuk update data transaksi parkir
+def update_db(plat_text, jenis_kendaraan):
+    cursor.execute("""
+        SELECT waktu_masuk FROM transaksi_parkir
+        WHERE platnomor = %s AND waktu_keluar IS NULL
+    """, (plat_text,))
+    hasil = cursor.fetchone()
+
+    #hitung durasi dan total biaya parkir
+    if not hasil:
+        return False
+    
+    waktu_masuk = hasil[0]
+    waktu_keluar = datetime.now()
+    durasi_parkir = int((waktu_keluar - waktu_masuk).total_seconds() / 60)
+
+    if durasi_parkir < 6:
+        total_biaya = 0
+    else:
+        jam_parkir = (durasi_parkir + 59) // 60
+
+        if jenis_kendaraan == "Motor":
+            biaya = 2000
+        elif jenis_kendaraan == "Mobil":
+            biaya = 5000
+        elif jenis_kendaraan == "Truk":
+            biaya = 10000
+
+        total_biaya = jam_parkir * biaya
+
+    sql_command = """
+            UPDATE transaksi_parkir
+            SET waktu_keluar = %s, durasi_parkir = %s, total_biaya = %s
+            WHERE platnomor = %s
+            AND waktu_keluar IS NULL
+        """
+    data = (waktu_keluar, durasi_parkir, total_biaya, plat_text)
+    cursor.execute(sql_command, data)
+    db.commit()
+    return cursor.rowcount > 0
+
+#
+def cek_waktu_masuk(plat_text):
+    cursor.execute(""" 
+        SELECT waktu_masuk FROM transaksi_parkir
+        WHERE platnomor = %s AND waktu_keluar IS NULL
+        ORDER BY waktu_masuk DESC
+        LIMIT 1
+    """, (plat_text,))
+
+    hasil = cursor.fetchone()
+
+    if hasil:
+        return datetime.now() - hasil[0] >= timedelta(minutes=6)
+
+    else:
+        return False
