@@ -22,11 +22,18 @@ def simpan(gambar, folder , nama_file):
 
 #fungsi untuk simpan kendaraan dan platnomor ke database untuk transaksi parkir
 def insert_db(plat_text, jenis_kendaraan, kendaraan_img, plat_img):
+    waktu = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    path_kendaraan = f"images/kendaraan/{waktu}.jpg"
+    path_platnomor = f"images/plat/{waktu}.jpg"
+
+    cv2.imwrite(f"./laravel/public/{path_kendaraan}", cv2.resize(kendaraan_img, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC))
+    cv2.imwrite(f"./laravel/public/{path_platnomor}", cv2.resize(plat_img, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC))
+
     sql_command = """
         INSERT INTO transaksi_parkir(platnomor, jenis_kendaraan, gambar_kendaraan, gambar_plat, waktu_masuk, waktu_keluar, durasi_parkir, total_biaya)
         VALUES (%s, %s, %s, %s, NOW(), %s, %s, %s)
     """
-    data = (plat_text, jenis_kendaraan, kendaraan_img, plat_img, None, None, None)
+    data = (plat_text, jenis_kendaraan, path_kendaraan, path_platnomor, None, None, None)
     cursor.execute(sql_command, data)
     db.commit()
 
@@ -71,7 +78,7 @@ def update_db(plat_text, jenis_kendaraan):
     db.commit()
     return cursor.rowcount > 0
 
-#
+#fungsi untuk jeda waktu update ke database
 def cek_waktu_masuk(plat_text):
     cursor.execute(""" 
         SELECT waktu_masuk FROM transaksi_parkir

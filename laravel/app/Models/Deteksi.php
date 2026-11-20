@@ -6,6 +6,6 @@ use Illuminate\Database\Eloquent\Model;
 
 class Deteksi extends Model
 {
-    protected $table = 'deteksi';
+    protected $table = 'transaksi_parkir';
     public $timestamps = false;
 }

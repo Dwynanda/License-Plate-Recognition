@@ -15,11 +15,11 @@ os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
 #inisialisasi main streaming dari IP CCTV
 cctv_main = "rtsp://admin:L2034E56@192.168.1.13:554/cam/realmonitor?channel=1&subtype=0" #  <-- IP CCTV
-kamera_main = cv2.VideoCapture("./python/footage/p0.avi")
+kamera_main = cv2.VideoCapture("./python/footage/p3.avi")
 
 #inisialisasi sub streaming dari IP CCTV
 cctv_sub = "rtsp://admin:L2034E56@192.168.1.13:554/cam/realmonitor?channel=1&subtype=1" #  <-- IP CCTV
-kamera_sub = cv2.VideoCapture("./python/footage/p0.avi")
+kamera_sub = cv2.VideoCapture("./python/footage/p3.avi")
 
 #inisialisasi model deteksi, dan variabel-variabel
 model_kendaraan = YOLO("./python/model/yolo11n.pt")
@@ -27,7 +27,7 @@ model_plat = YOLO("./python/model/best.pt")
 ocr = LicensePlateRecognizer("cct-s-v2-global-model")
 
 waktu_terakhir = 0
-waktu_deteksi = 0.5
+waktu_deteksi = 2
 platnomor_list = set()
 nomor_file = 0
 nomor = 0
@@ -64,14 +64,12 @@ while True:
         else:
             continue
 
-        #crop_kendaraan = frame_sub[atas:bawah, kanan:kiri]
-
     #deteksi platnomor
         waktu_sekarang = time.time()
         if waktu_sekarang - waktu_terakhir >= waktu_deteksi:
         #menyamakan posisi Main Stream dengan Sub Stream
-            # posisi_video = kamera_sub.get(cv2.CAP_PROP_POS_MSEC)
-            # kamera_main.set(cv2.CAP_PROP_POS_MSEC, posisi_video)
+            posisi_video = kamera_sub.get(cv2.CAP_PROP_POS_MSEC)
+            kamera_main.set(cv2.CAP_PROP_POS_MSEC, posisi_video)
 
         #capture kendaraan menggunakan main streaming CCTV
             ret_main, frame_main = kamera_main.read()
@@ -104,6 +102,8 @@ while True:
                 print("Plat terdeteksi")
                 kanan, atas, kiri, bawah = map(int, platnomor.xyxy[0])
                 crop_platnomor = crop_kendaraan[atas:bawah, kanan:kiri]
+                print("Lebar:", crop_platnomor.shape[1], "pixel")
+                print("Tinggi:", crop_platnomor.shape[0], "pixel")
 
             #convert gambar platnomor menjadi text
                 if crop_platnomor is not None and crop_platnomor.size > 0:
@@ -112,6 +112,8 @@ while True:
                     for hasil_compiling in platnomor_compiling:
                         platnomor_text = hasil_compiling.plate
                         score = float(np.mean(hasil_compiling.char_probs))
+                        print(score)
+                        print(platnomor_text)
                 else:   
                     continue
                     
@@ -124,12 +126,12 @@ while True:
 
                         if not any(SequenceMatcher(None, platnomor_text, char[0]).ratio() > 0.80 for char in database_plat):
                         #jika dikenali, maka save image kendaraan dan platnomor ke folder images
-                            nomor_file += 1
-                            path_kendaraan = simpan(crop_kendaraan, "./laravel/public/images/kendaraan", f"{nomor_file}.jpg")
-                            path_plat = simpan(crop_platnomor, "./laravel/public/images/plat", f"{nomor_file}.jpg")
+                            # nomor_file += 1
+                            # path_kendaraan = simpan(crop_kendaraan, "./laravel/public/images/kendaraan", f"{nomor_file}.jpg")
+                            # path_plat = simpan(crop_platnomor, "./laravel/public/images/plat", f"{nomor_file}.jpg")
 
                         #dan jika dikenali, menyimpan data kendaraan dan platnomor ke database
-                            insert_db(platnomor_text, jenis_kendaraan, f"images/kendaraan/{nomor_file}.jpg", f"images/plat/{nomor_file}.jpg",)
+                            insert_db(platnomor_text, jenis_kendaraan, crop_kendaraan, crop_platnomor)
                             platnomor_list.add(platnomor_text)
 
                             print("Platnomor : ", platnomor_text)
@@ -167,8 +169,9 @@ kamera_sub.release()
 kamera_main.release()
 cv2.destroyAllWindows()
 
-#nanti tabelnya itu dipasah antara mobil, motor, truck karena ini sistem parkir yang biaya parkirnya itu tergantung jenis kendaraan. tambahkan id pada tabel(id transaksi)
-#sistem parkirnya itu in dan out, jangan digabung
 #nanti web nya itu bisa langsung kalkulasi durasi dia parkir itu berapa jam/menit
 
-#perbaiki isi dari total_biaya pada tabel transaksi parkir, supaya nominalnya itu sesuai
+#fix filter jenis mobil pada website dan searchbar nya supaya dia terfilter sesuai pilihan
+#lanjutkan membuat parkir out
+#no pada tabel parkir in dan out di web ganti jdi id transaki berformat TRX000
+#nanti gabungkan semua footage dengan kondisi kendaraan yang bervariasi (in/out/mobil/truk/motor) dan coba streamingkan footagenya melalui hp, lalu gunakan streaming itu sebagai cctv
